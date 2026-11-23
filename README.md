@@ -1,0 +1,2 @@
+# SharedNotes
+Bluestaq evaluation endpoints
