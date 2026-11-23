@@ -1,0 +1,29 @@
+using SharedNotes.Api.Repositories;
+using SharedNotes.Api.Services;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Register the in-memory repository and note service with the ASP.NET Core dependency injection container.
+builder.Services.AddSingleton<INoteRepository, ConcurrentDictionaryNoteRepository>();
+builder.Services.AddScoped<INoteService, NoteService>();
+
+// Add services to the container.
+builder.Services.AddControllers();
+// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+builder.Services.AddOpenApi();
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.UseHttpsRedirection();
+
+app.UseAuthorization();
+
+app.MapControllers();
+
+app.Run();
