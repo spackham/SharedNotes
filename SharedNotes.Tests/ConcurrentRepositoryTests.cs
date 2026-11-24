@@ -34,8 +34,8 @@ public sealed class ConcurrentRepositoryTests
 
         await Task.WhenAll(Enumerable.Range(1, 100).Select(index =>
             index % 2 == 0
-                ? notes.ShareWithUserAsync(created.Id, "bob")
-                : notes.ShareWithTeamAsync(created.Id, "team-b")));
+                ? notes.ShareWithUserAsync(created.Id, "bob", true)
+                : notes.ShareWithTeamAsync(created.Id, "team-b", true)));
 
         var updated = await notes.GetByIdAsync(created.Id);
         Assert.Single(updated!.SharedWithUserIds);

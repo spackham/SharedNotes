@@ -5,91 +5,100 @@ namespace SharedNotes.Api.Services;
 
 public sealed class NoteService : INoteService
 {
-    private readonly INoteRepository _notes;
-    private readonly ITeamRepository _teams;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public NoteService(INoteRepository notes, ITeamRepository teams)
+    public NoteService(IUnitOfWork unitOfWork)
     {
-        _notes = notes;
-        _teams = teams;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<IReadOnlyCollection<NoteResponse>> GetVisibleAsync(string teamId, string userId, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        if (!await _teams.IsMemberAsync(teamId, userId, ct)) return Array.Empty<NoteResponse>();
-        return await _notes.GetVisibleToAsync(teamId, userId, ct);
+        if (!await _unitOfWork.Teams.IsMemberAsync(teamId, userId, ct)) return Array.Empty<NoteResponse>();
+        return await _unitOfWork.Notes.GetVisibleToAsync(teamId, userId, ct);
     }
 
     public async Task<NoteResponse?> GetAsync(Guid id, string teamId, string userId, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var note = await _notes.GetByIdAsync(id, ct);
+        var note = await _unitOfWork.Notes.GetByIdAsync(id, ct);
         if (note is null) return null;
 
         var isOwnerTeam = note.TeamId == teamId;
-        var isMember = await _teams.IsMemberAsync(teamId, userId, ct);
+        var isMember = await _unitOfWork.Teams.IsMemberAsync(teamId, userId, ct);
         var canDirectRead = note.SharedWithUserIds.Contains(userId);
         var canTeamRead = isMember && note.SharedWithTeamIds.Contains(teamId);
 
-        if (isOwnerTeam)
-            return isMember || canDirectRead ? note : null;
-
+        if (isOwnerTeam) return isMember || canDirectRead ? note : null;
         return canDirectRead || canTeamRead ? note : null;
     }
 
     public async Task<NoteResponse> CreateAsync(string teamId, string ownerUserId, CreateNoteRequest request, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        if (!await _teams.IsMemberAsync(teamId, ownerUserId, ct))
+        if (!await _unitOfWork.Teams.IsMemberAsync(teamId, ownerUserId, ct))
             throw new InvalidOperationException("The user is not a member of the team.");
-        return await _notes.CreateAsync(teamId, ownerUserId, request, ct);
+
+        var created = await _unitOfWork.Notes.CreateAsync(teamId, ownerUserId, request, ct);
+        await _unitOfWork.CommitAsync(ct);
+        return created;
     }
 
     public async Task<NoteResponse?> UpdateAsync(Guid id, string teamId, string userId, UpdateNoteRequest request, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var note = await _notes.GetByIdAsync(id, ct);
+        var note = await _unitOfWork.Notes.GetByIdAsync(id, ct);
         if (note is null) return null;
 
-        var isMember = await _teams.IsMemberAsync(teamId, userId, ct);
-        var canEdit = note.OwnerUserId == userId || note.SharedWithUserIds.Contains(userId) ||
-            (isMember && (note.TeamId == teamId || note.SharedWithTeamIds.Contains(teamId)));
-        if (!canEdit) return null;
-        if (!await _notes.UpdateAsync(id, request, ct)) return null;
-        return await _notes.GetByIdAsync(id, ct);
+        var isOwner = note.OwnerUserId == userId;
+        var isOwnerTeam = note.TeamId == teamId;
+        var isTeamMember = await _unitOfWork.Teams.IsMemberAsync(teamId, userId, ct);
+        var canDirectUpdate = note.AllowedUpdateUserIds.Contains(userId);
+        var canTeamUpdate = isTeamMember && note.AllowedUpdateTeamIds.Contains(teamId);
+
+        if (!isOwner && !canDirectUpdate && !(isOwnerTeam && canTeamUpdate)) return null;
+        if (!await _unitOfWork.Notes.UpdateAsync(id, request, ct)) return null;
+
+        await _unitOfWork.CommitAsync(ct);
+        return await _unitOfWork.Notes.GetByIdAsync(id, ct);
     }
 
     public async Task<bool> DeleteAsync(Guid id, string teamId, string userId, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var note = await _notes.GetByIdAsync(id, ct);
+        var note = await _unitOfWork.Notes.GetByIdAsync(id, ct);
         if (note is null || note.TeamId != teamId || note.OwnerUserId != userId) return false;
-        return await _notes.DeleteAsync(id, ct);
+
+        var deleted = await _unitOfWork.Notes.DeleteAsync(id, ct);
+        if (deleted) await _unitOfWork.CommitAsync(ct);
+        return deleted;
     }
 
     public async Task<NoteResponse?> ShareAsync(Guid id, string teamId, string ownerUserId, ShareNoteRequest request, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var note = await _notes.GetByIdAsync(id, ct);
+        var note = await _unitOfWork.Notes.GetByIdAsync(id, ct);
         if (note is null || note.TeamId != teamId || note.OwnerUserId != ownerUserId) return null;
 
         if (!string.IsNullOrWhiteSpace(request.UserId))
         {
             var userId = request.UserId.Trim();
             if (userId == ownerUserId) return null;
-            if (!await _notes.ShareWithUserAsync(id, userId, ct)) return null;
+            if (!await _unitOfWork.Notes.ShareWithUserAsync(id, userId, request.AllowUpdates, ct)) return null;
         }
 
         if (!string.IsNullOrWhiteSpace(request.TeamId))
         {
             var sharedTeamId = request.TeamId.Trim();
             if (sharedTeamId == teamId) return null;
-            if (await _teams.GetByIdAsync(sharedTeamId, ct) is null) return null;
-            if (!await _notes.ShareWithTeamAsync(id, sharedTeamId, ct)) return null;
+            if (await _unitOfWork.Teams.GetByIdAsync(sharedTeamId, ct) is null) return null;
+            if (!await _unitOfWork.Notes.ShareWithTeamAsync(id, sharedTeamId, request.AllowUpdates, ct)) return null;
         }
 
         if (string.IsNullOrWhiteSpace(request.UserId) && string.IsNullOrWhiteSpace(request.TeamId)) return null;
-        return await _notes.GetByIdAsync(id, ct);
+
+        await _unitOfWork.CommitAsync(ct);
+        return await _unitOfWork.Notes.GetByIdAsync(id, ct);
     }
 }

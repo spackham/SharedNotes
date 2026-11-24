@@ -30,6 +30,9 @@ public sealed record ShareNoteRequest
 
     [StringLength(200, MinimumLength = 1)]
     public string? TeamId { get; init; }
+
+    /// <summary>When true, the owner allows shared recipients to update the note.</summary>
+    public bool AllowUpdates { get; init; }
 }
 
 /// <summary>A note returned by the API.</summary>
@@ -41,5 +44,7 @@ public sealed record NoteResponse(
     string Content,
     IReadOnlyCollection<string> SharedWithUserIds,
     IReadOnlyCollection<string> SharedWithTeamIds,
+    IReadOnlyCollection<string> AllowedUpdateUserIds,
+    IReadOnlyCollection<string> AllowedUpdateTeamIds,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

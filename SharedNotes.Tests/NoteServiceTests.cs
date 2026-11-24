@@ -40,7 +40,11 @@ public sealed class NoteServiceTests
         await teams.AddMemberAsync(team.Id, "bob");
         var created = await service.CreateAsync(team.Id, "alice", NewCreateRequest("Trip", "Details"));
 
-        await service.ShareAsync(created.Id, team.Id, "alice", new ShareNoteRequest { UserId = "bob" });
+        await service.ShareAsync(created.Id, team.Id, "alice", new ShareNoteRequest
+        {
+            UserId = "bob",
+            AllowUpdates = true
+        });
 
         Assert.NotNull(await service.GetAsync(created.Id, team.Id, "bob"));
         Assert.NotNull(await service.UpdateAsync(created.Id, team.Id, "bob",
@@ -181,11 +185,53 @@ public sealed class NoteServiceTests
         Assert.Null(await service.ShareAsync(created.Id, team.Id, "alice", new ShareNoteRequest { UserId = userId }));
     }
 
+    [Fact]
+    public async Task ReadOnlyDirectShare_CanReadButCannotUpdate()
+    {
+        var (service, teams) = CreateService();
+        var team = await teams.CreateAsync(new CreateTeamRequest { Name = "Red Team" });
+        await teams.AddMemberAsync(team.Id, "alice");
+        await teams.AddMemberAsync(team.Id, "bob");
+        var created = await service.CreateAsync(team.Id, "alice", NewCreateRequest("Trip", "Details"));
+
+        await service.ShareAsync(created.Id, team.Id, "alice", new ShareNoteRequest
+        {
+            UserId = "bob",
+            AllowUpdates = false
+        });
+
+        Assert.NotNull(await service.GetAsync(created.Id, team.Id, "bob"));
+        Assert.Null(await service.UpdateAsync(created.Id, team.Id, "bob",
+            new UpdateNoteRequest { Title = "Denied", Content = "Read only" }));
+    }
+
+    [Fact]
+    public async Task ReadOnlyTeamShare_AllowsMembersToReadButNotUpdate()
+    {
+        var (service, teams) = CreateService();
+        var source = await teams.CreateAsync(new CreateTeamRequest { Name = "Red Team" });
+        var target = await teams.CreateAsync(new CreateTeamRequest { Name = "Blue Team" });
+        await teams.AddMemberAsync(source.Id, "alice");
+        await teams.AddMemberAsync(target.Id, "bob");
+        var created = await service.CreateAsync(source.Id, "alice", NewCreateRequest("Trip", "Details"));
+
+        await service.ShareAsync(created.Id, source.Id, "alice", new ShareNoteRequest
+        {
+            TeamId = target.Id,
+            AllowUpdates = false
+        });
+
+        Assert.NotNull(await service.GetAsync(created.Id, target.Id, "bob"));
+        Assert.Null(await service.UpdateAsync(created.Id, target.Id, "bob",
+            new UpdateNoteRequest { Title = "Denied", Content = "Read only" }));
+    }
+
     private static (INoteService Service, ITeamRepository Teams) CreateService()
     {
         var teams = new ConcurrentDictionaryTeamRepository();
         var notes = new ConcurrentDictionaryNoteRepository();
-        return (new NoteService(notes, teams), teams);
+        var unitOfWork = new ConcurrentDictionaryUnitOfWork(notes, teams);
+        return (new NoteService(unitOfWork), teams);
     }
 
     private static CreateNoteRequest NewCreateRequest(string title, string content) =>
