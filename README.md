@@ -19,4 +19,8 @@ C. **What I would change with more time**
 - Add typed service outcomes, standardized HTTP errors, and stronger 403/404 testing.
 - Add explicit roles, audit history, pagination, logging, tracing, health checks, and deployment configuration.
 
-For detailed architecture, APIs, storage, testing, and security documentation, see [InformationDescription.md](InformationDescription.md) and [ArchitectureThoughts1Doc.md](ArchitectureThoughts1Doc.md).
+## Testing Status
+
+The suite currently has 36 passing tests covering team membership, ownership, sharing, read/update permissions, concurrency, and HTTP create/read/update/delete flows. Integration coverage includes read-only shares, unauthorized sharing and deletion, wrong-team/missing-note access, invalid payloads, idempotent sharing, and concurrent HTTP creates.
+
+For detailed architecture, APIs, storage, testing, and security documentation, see [InformationDescription.md](InformationDescription.md), [ArchitectureThoughts1Doc.md](ArchitectureThoughts1Doc.md), and [TestingImprovements1.md](TestingImprovements1.md).

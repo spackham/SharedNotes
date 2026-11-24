@@ -4,8 +4,15 @@ using SharedNotes.Api.Services;
 
 namespace SharedNotes.Tests;
 
-public sealed class NoteServiceTests
+public sealed class NoteServiceTests : IClassFixture<SharedNotesTestFixture>
 {
+    private readonly SharedNotesTestFixture _fixture;
+
+    public NoteServiceTests(SharedNotesTestFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
     [Fact]
     public async Task TeamMember_CanCreateAndViewOwnedTeamNote()
     {
@@ -226,13 +233,8 @@ public sealed class NoteServiceTests
             new UpdateNoteRequest { Title = "Denied", Content = "Read only" }));
     }
 
-    private static (INoteService Service, ITeamRepository Teams) CreateService()
-    {
-        var teams = new ConcurrentDictionaryTeamRepository();
-        var notes = new ConcurrentDictionaryNoteRepository();
-        var unitOfWork = new ConcurrentDictionaryUnitOfWork(notes, teams);
-        return (new NoteService(unitOfWork), teams);
-    }
+    private (INoteService Service, ITeamRepository Teams) CreateService() =>
+        _fixture.CreateService();
 
     private static CreateNoteRequest NewCreateRequest(string title, string content) =>
         new() { Title = title, Content = content };

@@ -1,9 +1,12 @@
+using SharedNotes.Api.Identity;
 using SharedNotes.Api.Repositories;
 using SharedNotes.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Register the in-memory repository and note service with the ASP.NET Core dependency injection container.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUser, HeaderCurrentUser>();
 builder.Services.AddSingleton<INoteRepository, ConcurrentDictionaryNoteRepository>();
 builder.Services.AddSingleton<ITeamRepository, ConcurrentDictionaryTeamRepository>();
 builder.Services.AddScoped<IUnitOfWork, ConcurrentDictionaryUnitOfWork>();
