@@ -76,6 +76,22 @@ dotnet list SharedNotes.Tests/SharedNotes.Tests.csproj package --vulnerable --in
 
 GitHub CodeQL and Dependabot checks are configured under `.github/`.
 
+## 7. Run Tests Automatically on GitHub
+
+The public repository includes `.github/workflows/tests.yml`. GitHub Actions runs the complete .NET test suite on:
+
+- Pushes to `main`
+- Pull requests targeting `main`
+- Manual workflow dispatch
+
+The workflow restores dependencies, builds the test project in Release configuration, and runs all automated tests.
+
+GitHub Free is sufficient for this public repository. Results, logs, and pass/fail status appear under:
+
+- **Repository > Actions > .NET Tests**
+
+A successful run should report all 36 tests passing. GitHub Actions does not require a local development environment after the workflow file is committed and pushed.
+
 ## Known Temporary Limitation
 
 The `X-User-Id` header is not authentication. Test results demonstrate architecture and authorization logic, not production identity security.

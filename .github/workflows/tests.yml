@@ -1,0 +1,34 @@
+name: .NET Tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore SharedNotes.Tests/SharedNotes.Tests.csproj
+
+      - name: Build
+        run: dotnet build SharedNotes.Tests/SharedNotes.Tests.csproj --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test SharedNotes.Tests/SharedNotes.Tests.csproj --configuration Release --no-build --verbosity normal
