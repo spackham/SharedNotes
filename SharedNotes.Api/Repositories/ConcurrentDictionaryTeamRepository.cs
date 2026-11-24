@@ -6,18 +6,27 @@ namespace SharedNotes.Api.Repositories;
 public sealed class ConcurrentDictionaryTeamRepository : ITeamRepository
 {
     private readonly ConcurrentDictionary<string, TeamRecord> _teams = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _teamIdsByName =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public Task<TeamResponse> CreateAsync(CreateTeamRequest request, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         var name = request.Name.Trim();
         if (name.Length == 0) throw new ArgumentException("Team name is required.", nameof(request));
-        if (_teams.Values.Any(team => string.Equals(team.Name, name, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException("A team with that name already exists.");
 
         var team = new TeamRecord(Guid.NewGuid().ToString("N"), name,
             Array.Empty<string>(), DateTimeOffset.UtcNow);
-        _teams[team.Id] = team;
+
+        if (!_teamIdsByName.TryAdd(name, team.Id))
+            throw new InvalidOperationException("A team with that name already exists.");
+
+        if (!_teams.TryAdd(team.Id, team))
+        {
+            _teamIdsByName.TryRemove(name, out _);
+            throw new InvalidOperationException("The team could not be created.");
+        }
+
         return Task.FromResult(ToResponse(team));
     }
 
@@ -48,15 +57,24 @@ public sealed class ConcurrentDictionaryTeamRepository : ITeamRepository
         ct.ThrowIfCancellationRequested();
         var normalizedUserId = userId.Trim();
         if (normalizedUserId.Length == 0) throw new ArgumentException("User ID is required.", nameof(userId));
-        if (!_teams.TryGetValue(teamId, out var current)) return Task.FromResult<TeamResponse?>(null);
-        if (current.MemberUserIds.Contains(normalizedUserId, StringComparer.Ordinal))
-            return Task.FromResult<TeamResponse?>(ToResponse(current));
 
-        var updated = current with
+        for (var attempt = 0; attempt < 32; attempt++)
         {
-            MemberUserIds = current.MemberUserIds.Concat([normalizedUserId]).Distinct(StringComparer.Ordinal).ToArray()
-        };
-        return Task.FromResult(_teams.TryUpdate(teamId, updated, current) ? ToResponse(updated) : null);
+            ct.ThrowIfCancellationRequested();
+            if (!_teams.TryGetValue(teamId, out var current)) return Task.FromResult<TeamResponse?>(null);
+            if (current.MemberUserIds.Contains(normalizedUserId, StringComparer.Ordinal))
+                return Task.FromResult<TeamResponse?>(ToResponse(current));
+
+            var updated = current with
+            {
+                MemberUserIds = current.MemberUserIds.Concat([normalizedUserId]).Distinct(StringComparer.Ordinal).ToArray()
+            };
+
+            if (_teams.TryUpdate(teamId, updated, current))
+                return Task.FromResult<TeamResponse?>(ToResponse(updated));
+        }
+
+        return Task.FromResult<TeamResponse?>(null);
     }
 
     private static TeamResponse ToResponse(TeamRecord team) => new(team.Id, team.Name,

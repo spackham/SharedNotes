@@ -67,25 +67,58 @@ public sealed class NoteService : INoteService
         var note = await GetNoteAsync(id, ct);
         if (note is null || !CanShare(note, teamId, ownerUserId)) return null;
 
+        string? directUserId = null;
         if (!string.IsNullOrWhiteSpace(request.UserId))
         {
-            var userId = request.UserId.Trim();
-            if (userId == ownerUserId) return null;
-            if (!await _unitOfWork.Notes.ShareWithUserAsync(id, userId, request.AllowUpdates, ct)) return null;
+            directUserId = request.UserId.Trim();
+            if (directUserId == ownerUserId) return null;
         }
 
+        string? sharedTeamId = null;
         if (!string.IsNullOrWhiteSpace(request.TeamId))
         {
-            var sharedTeamId = request.TeamId.Trim();
+            sharedTeamId = request.TeamId.Trim();
             if (sharedTeamId == teamId) return null;
             if (!await TeamExistsAsync(sharedTeamId, ct)) return null;
-            if (!await _unitOfWork.Notes.ShareWithTeamAsync(id, sharedTeamId, request.AllowUpdates, ct)) return null;
         }
 
-        if (string.IsNullOrWhiteSpace(request.UserId) && string.IsNullOrWhiteSpace(request.TeamId)) return null;
+        if (directUserId is null && sharedTeamId is null) return null;
+
+        if (!await _unitOfWork.Notes.ShareAsync(id, directUserId, sharedTeamId,
+            request.AllowUpdates, ct)) return null;
 
         await _unitOfWork.CommitAsync(ct);
         return await GetNoteAsync(id, ct);
+    }
+
+    public async Task<bool> RemoveUserShareAsync(Guid id, string teamId, string ownerUserId,
+        string sharedUserId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var note = await GetNoteAsync(id, ct);
+        if (note is null || !CanShare(note, teamId, ownerUserId)) return false;
+
+        var normalizedUserId = sharedUserId.Trim();
+        if (normalizedUserId.Length == 0) return false;
+
+        var removed = await _unitOfWork.Notes.RemoveUserShareAsync(id, normalizedUserId, ct);
+        if (removed) await _unitOfWork.CommitAsync(ct);
+        return removed;
+    }
+
+    public async Task<bool> RemoveTeamShareAsync(Guid id, string teamId, string ownerUserId,
+        string sharedTeamId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var note = await GetNoteAsync(id, ct);
+        if (note is null || !CanShare(note, teamId, ownerUserId)) return false;
+
+        var normalizedTeamId = sharedTeamId.Trim();
+        if (normalizedTeamId.Length == 0) return false;
+
+        var removed = await _unitOfWork.Notes.RemoveTeamShareAsync(id, normalizedTeamId, ct);
+        if (removed) await _unitOfWork.CommitAsync(ct);
+        return removed;
     }
 
     private Task<NoteResponse?> GetNoteAsync(Guid id, CancellationToken ct) =>
@@ -102,23 +135,29 @@ public sealed class NoteService : INoteService
 
     private async Task<bool> CanReadAsync(NoteResponse note, string teamId, string userId, CancellationToken ct)
     {
-        var isMember = await IsTeamMemberAsync(teamId, userId, ct);
-        var isOwnerTeam = note.TeamId == teamId;
-        var canDirectRead = note.SharedWithUserIds.Contains(userId);
-        var canTeamRead = isMember && note.SharedWithTeamIds.Contains(teamId);
+        if (note.TeamId == teamId)
+        {
+            var isMember = await IsTeamMemberAsync(teamId, userId, ct);
+            return isMember || note.SharedWithUserIds.Contains(userId);
+        }
 
-        return isOwnerTeam ? isMember || canDirectRead : canDirectRead || canTeamRead;
+        var isTargetTeamMember = await IsTeamMemberAsync(teamId, userId, ct);
+        return isTargetTeamMember && note.SharedWithTeamIds.Contains(teamId);
     }
 
     private async Task<bool> CanUpdateAsync(NoteResponse note, string teamId, string userId, CancellationToken ct)
     {
-        if (note.OwnerUserId == userId) return true;
+        if (note.TeamId == teamId)
+        {
+            var isOwnerTeamMember = await IsTeamMemberAsync(teamId, userId, ct);
+            if (!isOwnerTeamMember) return false;
+            if (note.OwnerUserId == userId) return true;
+            return note.AllowedUpdateUserIds.Contains(userId);
+        }
 
-        var isMember = await IsTeamMemberAsync(teamId, userId, ct);
-        var canDirectUpdate = note.AllowedUpdateUserIds.Contains(userId);
-        var canTeamUpdate = isMember && note.TeamId != teamId && note.AllowedUpdateTeamIds.Contains(teamId);
-
-        return canDirectUpdate || canTeamUpdate;
+        var isTargetTeamMember = await IsTeamMemberAsync(teamId, userId, ct);
+        return isTargetTeamMember && note.SharedWithTeamIds.Contains(teamId) &&
+            note.AllowedUpdateTeamIds.Contains(teamId);
     }
 
     private static bool CanDelete(NoteResponse note, string teamId, string userId) =>

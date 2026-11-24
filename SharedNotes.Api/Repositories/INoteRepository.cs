@@ -11,4 +11,8 @@ public interface INoteRepository
     Task<bool> DeleteAsync(Guid id, CancellationToken ct = default);
     Task<bool> ShareWithUserAsync(Guid id, string userId, bool allowUpdates, CancellationToken ct = default);
     Task<bool> ShareWithTeamAsync(Guid id, string teamId, bool allowUpdates, CancellationToken ct = default);
+    Task<bool> ShareAsync(Guid id, string? directUserId, string? sharedTeamId,
+        bool allowUpdates, CancellationToken ct = default);
+    Task<bool> RemoveUserShareAsync(Guid id, string sharedUserId, CancellationToken ct = default);
+    Task<bool> RemoveTeamShareAsync(Guid id, string sharedTeamId, CancellationToken ct = default);
 }

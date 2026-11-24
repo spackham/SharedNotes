@@ -46,5 +46,6 @@ public sealed record NoteResponse(
     IReadOnlyCollection<string> SharedWithTeamIds,
     IReadOnlyCollection<string> AllowedUpdateUserIds,
     IReadOnlyCollection<string> AllowedUpdateTeamIds,
+    int Version,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

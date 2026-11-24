@@ -41,7 +41,7 @@ public sealed class EndpointIntegrationTests : IClassFixture<WebApplicationFacto
         var response = await _client.PostAsJsonAsync($"/api/v1/teams/{team!.Id}/notes",
             new CreateNoteRequest { Title = "Missing header", Content = "Details" });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
@@ -268,7 +268,7 @@ public sealed class EndpointIntegrationTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
-    public async Task BlankUpdatePayloadAndMissingHeaderReturnBadRequest()
+    public async Task BlankUpdatePayloadReturnsBadRequestAndMissingHeaderReturnsUnauthorized()
     {
         var (team, owner) = await CreateTeamWithMemberAsync("alice");
         var created = await CreateNoteAsync(team.Id, owner, "Original", "Details");
@@ -282,7 +282,7 @@ public sealed class EndpointIntegrationTests : IClassFixture<WebApplicationFacto
         using var missingHeaderRequest = await CreateJsonRequestAsync(HttpMethod.Put,
             $"/api/v1/teams/{team.Id}/notes/{created.Id}", null,
             new UpdateNoteRequest { Title = "No header", Content = "Details" });
-        Assert.Equal(HttpStatusCode.BadRequest,
+        Assert.Equal(HttpStatusCode.Unauthorized,
             (await _client.SendAsync(missingHeaderRequest)).StatusCode);
     }
 
@@ -357,5 +357,71 @@ public sealed class EndpointIntegrationTests : IClassFixture<WebApplicationFacto
         var request = CreateRequest(method, url, userId);
         request.Content = JsonContent.Create(body);
         return Task.FromResult(request);
+    }
+
+    [Fact]
+    public async Task OwnerAndDirectShareCannotUseWrongTeamRoute()
+    {
+        var (team, owner) = await CreateTeamWithMemberAsync("alice");
+        await AddMemberAsync(team.Id, "bob");
+        var created = await CreateNoteAsync(team.Id, owner, "Scoped note", "Details");
+
+        using var shareRequest = await CreateJsonRequestAsync(HttpMethod.Post,
+            $"/api/v1/teams/{team.Id}/notes/{created.Id}/share", owner,
+            new ShareNoteRequest { UserId = "bob", AllowUpdates = true });
+        Assert.Equal(HttpStatusCode.OK, (await _client.SendAsync(shareRequest)).StatusCode);
+
+        var otherTeamCreate = await _client.PostAsJsonAsync("/api/v1/teams",
+            new CreateTeamRequest { Name = $"Wrong {Guid.NewGuid():N}" });
+        var otherTeam = await otherTeamCreate.Content.ReadFromJsonAsync<TeamResponse>();
+
+        using var ownerGet = CreateRequest(HttpMethod.Get,
+            $"/api/v1/teams/{otherTeam!.Id}/notes/{created.Id}", owner);
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.SendAsync(ownerGet)).StatusCode);
+
+        using var bobGet = CreateRequest(HttpMethod.Get,
+            $"/api/v1/teams/{otherTeam.Id}/notes/{created.Id}", "bob");
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.SendAsync(bobGet)).StatusCode);
+
+        using var ownerUpdate = await CreateJsonRequestAsync(HttpMethod.Put,
+            $"/api/v1/teams/{otherTeam.Id}/notes/{created.Id}", owner,
+            new UpdateNoteRequest { Title = "Wrong route", Content = "Denied" });
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await _client.SendAsync(ownerUpdate)).StatusCode);
+
+        using var bobUpdate = await CreateJsonRequestAsync(HttpMethod.Put,
+            $"/api/v1/teams/{otherTeam.Id}/notes/{created.Id}", "bob",
+            new UpdateNoteRequest { Title = "Wrong route", Content = "Denied" });
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await _client.SendAsync(bobUpdate)).StatusCode);
+    }
+
+    [Fact]
+    public async Task InvalidCombinedShareDoesNotApplyDirectUserShare()
+    {
+        var (team, owner) = await CreateTeamWithMemberAsync("alice");
+        var created = await CreateNoteAsync(team.Id, owner, "Atomic share", "Details");
+
+        using var shareRequest = await CreateJsonRequestAsync(HttpMethod.Post,
+            $"/api/v1/teams/{team.Id}/notes/{created.Id}/share", owner,
+            new ShareNoteRequest
+            {
+                UserId = "bob",
+                TeamId = "missing-team",
+                AllowUpdates = true
+            });
+
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await _client.SendAsync(shareRequest)).StatusCode);
+
+        using var bobGet = CreateRequest(HttpMethod.Get,
+            $"/api/v1/teams/{team.Id}/notes/{created.Id}", "bob");
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.SendAsync(bobGet)).StatusCode);
+
+        using var bobUpdate = await CreateJsonRequestAsync(HttpMethod.Put,
+            $"/api/v1/teams/{team.Id}/notes/{created.Id}", "bob",
+            new UpdateNoteRequest { Title = "Should remain denied", Content = "Denied" });
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await _client.SendAsync(bobUpdate)).StatusCode);
     }
 }

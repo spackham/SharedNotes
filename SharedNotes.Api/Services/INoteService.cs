@@ -10,4 +10,6 @@ public interface INoteService
     Task<NoteResponse?> UpdateAsync(Guid id, string teamId, string userId, UpdateNoteRequest request, CancellationToken ct = default);
     Task<bool> DeleteAsync(Guid id, string teamId, string userId, CancellationToken ct = default);
     Task<NoteResponse?> ShareAsync(Guid id, string teamId, string ownerUserId, ShareNoteRequest request, CancellationToken ct = default);
+    Task<bool> RemoveUserShareAsync(Guid id, string teamId, string ownerUserId, string sharedUserId, CancellationToken ct = default);
+    Task<bool> RemoveTeamShareAsync(Guid id, string teamId, string ownerUserId, string sharedTeamId, CancellationToken ct = default);
 }
