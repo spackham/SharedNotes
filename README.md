@@ -23,4 +23,13 @@ C. **What I would change with more time**
 
 The suite currently has 36 passing tests covering team membership, ownership, sharing, read/update permissions, concurrency, and HTTP create/read/update/delete flows. Integration coverage includes read-only shares, unauthorized sharing and deletion, wrong-team/missing-note access, invalid payloads, idempotent sharing, and concurrent HTTP creates.
 
-For detailed architecture, APIs, storage, testing, and security documentation, see [InformationDescription.md](InformationDescription.md), [ArchitectureThoughts1Doc.md](ArchitectureThoughts1Doc.md), and [TestingImprovements1.md](TestingImprovements1.md).
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Architecture review](docs/architecture-review.md)
+- [Implementation details](docs/implementation.md)
+- [Code cleanup](docs/code-cleanup.md)
+- [Security](docs/security.md)
+- [Testing improvements](docs/testing.md)
+- [QA instructions](docs/qa.md)
+- [REST endpoint guide](docs/rest-endpoint-guide.md)
