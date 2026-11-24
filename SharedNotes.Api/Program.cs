@@ -5,6 +5,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Register the in-memory repository and note service with the ASP.NET Core dependency injection container.
 builder.Services.AddSingleton<INoteRepository, ConcurrentDictionaryNoteRepository>();
+builder.Services.AddSingleton<ITeamRepository, ConcurrentDictionaryTeamRepository>();
 builder.Services.AddScoped<INoteService, NoteService>();
 
 // Add services to the container.
@@ -27,3 +28,5 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+public partial class Program;

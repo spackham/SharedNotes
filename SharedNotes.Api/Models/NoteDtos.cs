@@ -22,19 +22,24 @@ public sealed record UpdateNoteRequest
     public required string Content { get; init; }
 }
 
-/// <summary>Payload for granting another user access to a note.</summary>
+/// <summary>Payload for granting another user or team access to a note.</summary>
 public sealed record ShareNoteRequest
 {
-    [Required, StringLength(200, MinimumLength = 1)]
-    public required string UserId { get; init; }
+    [StringLength(200, MinimumLength = 1)]
+    public string? UserId { get; init; }
+
+    [StringLength(200, MinimumLength = 1)]
+    public string? TeamId { get; init; }
 }
 
 /// <summary>A note returned by the API.</summary>
 public sealed record NoteResponse(
     Guid Id,
-    string OwnerId,
+    string TeamId,
+    string OwnerUserId,
     string Title,
     string Content,
-    IReadOnlyCollection<string> SharedWith,
+    IReadOnlyCollection<string> SharedWithUserIds,
+    IReadOnlyCollection<string> SharedWithTeamIds,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

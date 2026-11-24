@@ -5,57 +5,91 @@ namespace SharedNotes.Api.Services;
 
 public sealed class NoteService : INoteService
 {
-    private readonly INoteRepository _repository;
+    private readonly INoteRepository _notes;
+    private readonly ITeamRepository _teams;
 
-    public NoteService(INoteRepository repository) => _repository = repository;
-
-    public Task<IReadOnlyCollection<NoteResponse>> GetVisibleAsync(string userId, CancellationToken ct = default)
+    public NoteService(INoteRepository notes, ITeamRepository teams)
     {
-        ct.ThrowIfCancellationRequested();
-        return Task.FromResult(_repository.GetVisibleTo(userId));
+        _notes = notes;
+        _teams = teams;
     }
 
-    public Task<NoteResponse?> GetAsync(Guid id, string userId, CancellationToken ct = default)
+    public async Task<IReadOnlyCollection<NoteResponse>> GetVisibleAsync(string teamId, string userId, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var note = _repository.GetById(id);
-        if (note is null || (note.OwnerId != userId && !note.SharedWith.Contains(userId))) return Task.FromResult<NoteResponse?>(null);
-        return Task.FromResult<NoteResponse?>(note);
+        if (!await _teams.IsMemberAsync(teamId, userId, ct)) return Array.Empty<NoteResponse>();
+        return await _notes.GetVisibleToAsync(teamId, userId, ct);
     }
 
-    public Task<NoteResponse> CreateAsync(string ownerId, CreateNoteRequest request, CancellationToken ct = default)
+    public async Task<NoteResponse?> GetAsync(Guid id, string teamId, string userId, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(_repository.Create(ownerId, request));
+        var note = await _notes.GetByIdAsync(id, ct);
+        if (note is null) return null;
+
+        var isOwnerTeam = note.TeamId == teamId;
+        var isMember = await _teams.IsMemberAsync(teamId, userId, ct);
+        var canDirectRead = note.SharedWithUserIds.Contains(userId);
+        var canTeamRead = isMember && note.SharedWithTeamIds.Contains(teamId);
+
+        if (isOwnerTeam)
+            return isMember || canDirectRead ? note : null;
+
+        return canDirectRead || canTeamRead ? note : null;
     }
 
-    public Task<NoteResponse?> UpdateAsync(Guid id, string userId, UpdateNoteRequest request, CancellationToken ct = default)
+    public async Task<NoteResponse> CreateAsync(string teamId, string ownerUserId, CreateNoteRequest request, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var note = _repository.GetById(id);
-        if (note is null || (note.OwnerId != userId && !note.SharedWith.Contains(userId))) return Task.FromResult<NoteResponse?>(null);
-        if (!_repository.Update(id, request)) return Task.FromResult<NoteResponse?>(null);
-        return Task.FromResult(_repository.GetById(id));
+        if (!await _teams.IsMemberAsync(teamId, ownerUserId, ct))
+            throw new InvalidOperationException("The user is not a member of the team.");
+        return await _notes.CreateAsync(teamId, ownerUserId, request, ct);
     }
 
-    public Task<bool> DeleteAsync(Guid id, string userId, CancellationToken ct = default)
+    public async Task<NoteResponse?> UpdateAsync(Guid id, string teamId, string userId, UpdateNoteRequest request, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var note = _repository.GetById(id);
-        if (note is null || note.OwnerId != userId) return Task.FromResult(false);
-        return Task.FromResult(_repository.Delete(id));
+        var note = await _notes.GetByIdAsync(id, ct);
+        if (note is null) return null;
+
+        var isMember = await _teams.IsMemberAsync(teamId, userId, ct);
+        var canEdit = note.OwnerUserId == userId || note.SharedWithUserIds.Contains(userId) ||
+            (isMember && (note.TeamId == teamId || note.SharedWithTeamIds.Contains(teamId)));
+        if (!canEdit) return null;
+        if (!await _notes.UpdateAsync(id, request, ct)) return null;
+        return await _notes.GetByIdAsync(id, ct);
     }
 
-    public Task<NoteResponse?> ShareAsync(Guid id, string ownerId, ShareNoteRequest request, CancellationToken ct = default)
+    public async Task<bool> DeleteAsync(Guid id, string teamId, string userId, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var note = _repository.GetById(id);
-        if (note is null) return Task.FromResult<NoteResponse?>(null);
-        if (note.OwnerId != ownerId) return Task.FromResult<NoteResponse?>(null);
+        var note = await _notes.GetByIdAsync(id, ct);
+        if (note is null || note.TeamId != teamId || note.OwnerUserId != userId) return false;
+        return await _notes.DeleteAsync(id, ct);
+    }
 
-        var userId = request.UserId.Trim();
-        if (userId.Length == 0 || userId == ownerId) return Task.FromResult<NoteResponse?>(null);
-        if (!_repository.Share(id, userId)) return Task.FromResult<NoteResponse?>(null);
-        return Task.FromResult(_repository.GetById(id));
+    public async Task<NoteResponse?> ShareAsync(Guid id, string teamId, string ownerUserId, ShareNoteRequest request, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var note = await _notes.GetByIdAsync(id, ct);
+        if (note is null || note.TeamId != teamId || note.OwnerUserId != ownerUserId) return null;
+
+        if (!string.IsNullOrWhiteSpace(request.UserId))
+        {
+            var userId = request.UserId.Trim();
+            if (userId == ownerUserId) return null;
+            if (!await _notes.ShareWithUserAsync(id, userId, ct)) return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.TeamId))
+        {
+            var sharedTeamId = request.TeamId.Trim();
+            if (sharedTeamId == teamId) return null;
+            if (await _teams.GetByIdAsync(sharedTeamId, ct) is null) return null;
+            if (!await _notes.ShareWithTeamAsync(id, sharedTeamId, ct)) return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.UserId) && string.IsNullOrWhiteSpace(request.TeamId)) return null;
+        return await _notes.GetByIdAsync(id, ct);
     }
 }

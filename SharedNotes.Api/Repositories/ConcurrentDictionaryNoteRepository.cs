@@ -7,79 +7,87 @@ public sealed class ConcurrentDictionaryNoteRepository : INoteRepository
 {
     private readonly ConcurrentDictionary<Guid, NoteRecord> _notes = new();
 
-    public IReadOnlyCollection<NoteResponse> GetVisibleTo(string userId) =>
-        _notes.Values
-            .Where(note => note.OwnerId == userId || note.SharedWith.Contains(userId))
+    public Task<IReadOnlyCollection<NoteResponse>> GetVisibleToAsync(string teamId, string userId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        IReadOnlyCollection<NoteResponse> notes = _notes.Values
+            .Where(note =>
+                note.SharedWithUserIds.Contains(userId) ||
+                note.SharedWithTeamIds.Contains(teamId) ||
+                (note.TeamId == teamId && (note.OwnerUserId == userId || note.SharedWithUserIds.Contains(userId))))
             .OrderByDescending(note => note.UpdatedAt)
             .Select(ToResponse)
             .ToArray();
+        return Task.FromResult(notes);
+    }
 
-    public NoteResponse? GetById(Guid id) =>
-        _notes.TryGetValue(id, out var note) ? ToResponse(note) : null;
-
-    public NoteResponse Create(string ownerId, CreateNoteRequest request)
+    public Task<NoteResponse?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(_notes.TryGetValue(id, out var note) ? ToResponse(note) : null);
+    }
+
+    public Task<NoteResponse> CreateAsync(string teamId, string ownerUserId, CreateNoteRequest request, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
         var now = DateTimeOffset.UtcNow;
-        var note = new NoteRecord(Guid.NewGuid(), ownerId, request.Title.Trim(),
-            request.Content.Trim(), new HashSet<string>(StringComparer.Ordinal), now, now);
+        var note = new NoteRecord(Guid.NewGuid(), teamId, ownerUserId, request.Title.Trim(),
+            request.Content.Trim(), Array.Empty<string>(), Array.Empty<string>(), now, now);
         _notes[note.Id] = note;
-        return ToResponse(note);
+        return Task.FromResult(ToResponse(note));
     }
 
-    public bool Update(Guid id, UpdateNoteRequest request)
+    public Task<bool> UpdateAsync(Guid id, UpdateNoteRequest request, CancellationToken ct = default)
     {
-        return _notes.AddOrUpdate(id,
-            _ => throw new InvalidOperationException("The note was not found."),
-            (_, note) => note with
-            {
-                Title = request.Title.Trim(),
-                Content = request.Content.Trim(),
-                UpdatedAt = DateTimeOffset.UtcNow
-            }) is not null;
+        ct.ThrowIfCancellationRequested();
+        if (!_notes.TryGetValue(id, out var current)) return Task.FromResult(false);
+        var updated = current with { Title = request.Title.Trim(), Content = request.Content.Trim(), UpdatedAt = DateTimeOffset.UtcNow };
+        return Task.FromResult(_notes.TryUpdate(id, updated, current));
     }
 
-    public bool Delete(Guid id) => _notes.TryRemove(id, out _);
-
-    public bool Share(Guid id, string userId)
+    public Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        if (!_notes.TryGetValue(id, out _)) return false;
-
-        _notes.AddOrUpdate(id,
-            _ => throw new InvalidOperationException("The note was not found."),
-            (_, note) =>
-            {
-                if (note.SharedWith.Contains(userId)) return note;
-
-                var sharedWith = new HashSet<string>(note.SharedWith, StringComparer.Ordinal)
-                {
-                    userId
-                };
-
-                return note with
-                {
-                    SharedWith = sharedWith,
-                    UpdatedAt = DateTimeOffset.UtcNow
-                };
-            });
-
-        return true;
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(_notes.TryRemove(id, out _));
     }
 
-    private static NoteResponse ToResponse(NoteRecord note) => new(
-        note.Id,
-        note.OwnerId,
-        note.Title,
-        note.Content,
-        note.SharedWith.ToArray(),
-        note.CreatedAt,
-        note.UpdatedAt);
+    public Task<bool> ShareWithUserAsync(Guid id, string userId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!_notes.TryGetValue(id, out var current)) return Task.FromResult(false);
+        if (current.SharedWithUserIds.Contains(userId)) return Task.FromResult(true);
+        var updated = current with
+        {
+            SharedWithUserIds = current.SharedWithUserIds.Concat([userId]).Distinct(StringComparer.Ordinal).ToArray(),
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        return Task.FromResult(_notes.TryUpdate(id, updated, current));
+    }
+
+    public Task<bool> ShareWithTeamAsync(Guid id, string teamId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!_notes.TryGetValue(id, out var current)) return Task.FromResult(false);
+        if (current.SharedWithTeamIds.Contains(teamId)) return Task.FromResult(true);
+        var updated = current with
+        {
+            SharedWithTeamIds = current.SharedWithTeamIds.Concat([teamId]).Distinct(StringComparer.Ordinal).ToArray(),
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        return Task.FromResult(_notes.TryUpdate(id, updated, current));
+    }
+
+    private static NoteResponse ToResponse(NoteRecord note) => new(note.Id, note.TeamId, note.OwnerUserId,
+        note.Title, note.Content, note.SharedWithUserIds, note.SharedWithTeamIds, note.CreatedAt, note.UpdatedAt);
 
     private sealed record NoteRecord(
         Guid Id,
-        string OwnerId,
+        string TeamId,
+        string OwnerUserId,
         string Title,
         string Content,
-        HashSet<string> SharedWith,
+        string[] SharedWithUserIds,
+        string[] SharedWithTeamIds,
         DateTimeOffset CreatedAt,
         DateTimeOffset UpdatedAt);
 }
